@@ -35,7 +35,7 @@ async function pollApi(gid, isMd5) {
       const data = resp.data;
 
       if (data.status === "OK" && Array.isArray(data.data)) {
-        // lấy sid cho TX từ cmd 1008
+        // TX cần lấy sid trước từ cmd 1008
         for (const game of data.data) {
           if (!isMd5 && game.cmd === 1008) {
             sidForTX = game.sid;
@@ -45,14 +45,21 @@ async function pollApi(gid, isMd5) {
         for (const game of data.data) {
           const cmd = game.cmd;
 
-          // ✅ xử lý MD5 (vgmn_101)
+          // ✅ xử lý MD5 (vgmn_101) => dùng cmd 7006
           if (isMd5 && cmd === 7006) {
             const sid = game.sid;
             const { d1, d2, d3 } = game;
             if (sid && d1 != null && d2 != null && d3 != null) {
               const total = d1 + d2 + d3;
               const ketQua = getTaiXiu(d1, d2, d3);
-              const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
+              const result = {
+                Phien: sid,
+                Xuc_xac_1: d1,
+                Xuc_xac_2: d2,
+                Xuc_xac_3: d3,
+                Tong: total,
+                Ket_qua: ketQua
+              };
               updateResult(latest101, history101, result);
               console.log(`[MD5] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
             }
@@ -65,7 +72,14 @@ async function pollApi(gid, isMd5) {
             if (sid && d1 != null && d2 != null && d3 != null) {
               const total = d1 + d2 + d3;
               const ketQua = getTaiXiu(d1, d2, d3);
-              const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
+              const result = {
+                Phien: sid,
+                Xuc_xac_1: d1,
+                Xuc_xac_2: d2,
+                Xuc_xac_3: d3,
+                Tong: total,
+                Ket_qua: ketQua
+              };
               updateResult(latest100, history100, result);
               console.log(`[TX] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
               sidForTX = null;

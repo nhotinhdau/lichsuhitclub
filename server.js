@@ -37,7 +37,10 @@ async function pollApi(gid, isMd5) {
       const resp = await axios.get(url, { headers: { "User-Agent": "Node-Proxy/1.0" }, timeout: 10000 });
       const data = resp.data;
 
-      if (data.status === "OK" && Array.isArray(data.data)) {
+      // Nếu chưa có dữ liệu thì giữ nguyên phiên hiện tại, không update
+      if (!data || data.status !== "OK" || !Array.isArray(data.data) || data.data.length === 0) {
+        console.log(`[${gid}] ⏸ Chưa có dữ liệu mới, giữ nguyên phiên hiện tại: ${isMd5 ? latest101.Phien : latest100.Phien}`);
+      } else {
         // lấy sid cho TX từ cmd 1008
         for (const game of data.data) {
           if (!isMd5 && game.cmd === 1008) {
@@ -57,7 +60,7 @@ async function pollApi(gid, isMd5) {
               const ketQua = getTaiXiu(d1, d2, d3);
               const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
               updateResult(latest101, history101, result);
-              console.log(`[MD5] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
+              console.log(`[MD5] ✅ Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
             }
           }
 
@@ -70,14 +73,15 @@ async function pollApi(gid, isMd5) {
               const ketQua = getTaiXiu(d1, d2, d3);
               const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
               updateResult(latest100, history100, result);
-              console.log(`[TX] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
-              sidForTX = null; // reset để tránh lặp sai
+              console.log(`[TX] ✅ Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
+              sidForTX = null;
             }
           }
         }
       }
     } catch (e) {
-      console.error(`Lỗi khi lấy dữ liệu API ${gid}:`, e.message);
+      console.error(`❌ Lỗi khi lấy dữ liệu API ${gid}:`, e.message);
+      // lỗi thì giữ nguyên kết quả cũ
       await new Promise(r => setTimeout(r, RETRY_DELAY));
     }
     await new Promise(r => setTimeout(r, POLL_INTERVAL));

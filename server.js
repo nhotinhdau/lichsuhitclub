@@ -14,7 +14,10 @@ let latest101 = { Phien: 0, Xuc_xac_1: 0, Xuc_xac_2: 0, Xuc_xac_3: 0, Tong: 0, K
 let history100 = [];
 let history101 = [];
 
+let lastSid100 = null;
+let lastSid101 = null;
 let sidForTX = null;
+let sidForMD5 = null; // lưu sid của md5 khi có 2007
 
 function getTaiXiu(d1, d2, d3) {
   const total = d1 + d2 + d3;
@@ -33,56 +36,43 @@ async function pollApi(gid, isMd5) {
     try {
       const resp = await axios.get(url, { headers: { "User-Agent": "Node-Proxy/1.0" }, timeout: 10000 });
       const data = resp.data;
-
       if (data.status === "OK" && Array.isArray(data.data)) {
-        // TX cần lấy sid trước từ cmd 1008
-        for (const game of data.data) {
-          if (!isMd5 && game.cmd === 1008) {
-            sidForTX = game.sid;
-          }
-        }
-
         for (const game of data.data) {
           const cmd = game.cmd;
 
-          // ✅ xử lý MD5 (vgmn_101) => dùng cmd 7006
-          if (isMd5 && cmd === 7006) {
-            const sid = game.sid;
-            const { d1, d2, d3 } = game;
-            if (sid && d1 != null && d2 != null && d3 != null) {
-              const total = d1 + d2 + d3;
-              const ketQua = getTaiXiu(d1, d2, d3);
-              const result = {
-                Phien: sid,
-                Xuc_xac_1: d1,
-                Xuc_xac_2: d2,
-                Xuc_xac_3: d3,
-                Tong: total,
-                Ket_qua: ketQua
-              };
-              updateResult(latest101, history101, result);
-              console.log(`[MD5] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
-            }
+          // TX (gid=100)
+          if (!isMd5 && cmd === 1008) {
+            sidForTX = game.sid;
           }
-
-          // ✅ xử lý TX (vgmn_100)
-          else if (!isMd5 && cmd === 1003) {
+          if (!isMd5 && cmd === 1003) {
             const { d1, d2, d3 } = game;
             const sid = sidForTX;
-            if (sid && d1 != null && d2 != null && d3 != null) {
+            if (sid && sid !== lastSid100 && d1 != null && d2 != null && d3 != null) {
+              lastSid100 = sid;
               const total = d1 + d2 + d3;
               const ketQua = getTaiXiu(d1, d2, d3);
-              const result = {
-                Phien: sid,
-                Xuc_xac_1: d1,
-                Xuc_xac_2: d2,
-                Xuc_xac_3: d3,
-                Tong: total,
-                Ket_qua: ketQua
-              };
+              const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
               updateResult(latest100, history100, result);
               console.log(`[TX] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
               sidForTX = null;
+            }
+          }
+
+          // MD5 (gid=101)
+          if (isMd5 && cmd === 2007) {
+            sidForMD5 = game.sid; // lưu sid khi có 2007
+          }
+          if (isMd5 && cmd === 7006) {
+            const { d1, d2, d3 } = game;
+            const sid = sidForMD5;
+            if (sid && sid !== lastSid101 && d1 != null && d2 != null && d3 != null) {
+              lastSid101 = sid;
+              const total = d1 + d2 + d3;
+              const ketQua = getTaiXiu(d1, d2, d3);
+              const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
+              updateResult(latest101, history101, result);
+              console.log(`[MD5] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
+              sidForMD5 = null;
             }
           }
         }
@@ -107,20 +97,16 @@ function formatResult(result) {
 }
 
 // Start polling
-pollApi("vgmn_100", false); // TX
-pollApi("vgmn_101", true);  // MD5
+pollApi("vgmn_100", false);
+pollApi("vgmn_101", true);
 
 // API endpoints
 app.get("/api/taixiu", (req, res) => res.json(formatResult(latest100)));
 app.get("/api/taixiumd5", (req, res) => res.json(formatResult(latest101)));
-app.get("/api/history", (req, res) =>
-  res.json({
-    taixiu: history100.map(formatResult),
-    taixiumd5: history101.map(formatResult)
-  })
-);
-app.get("/", (req, res) =>
-  res.send("API Server for TaiXiu is running. Endpoints: /api/taixiu, /api/taixiumd5, /api/history")
-);
+app.get("/api/history", (req, res) => res.json({
+  taixiu: history100.map(formatResult),
+  taixiumd5: history101.map(formatResult)
+}));
+app.get("/", (req, res) => res.send("API Server for TaiXiu is running. Endpoints: /api/taixiu, /api/taixiumd5, /api/history"));
 
 app.listen(PORT, () => console.log(`✅ Server chạy trên cổng ${PORT}`));

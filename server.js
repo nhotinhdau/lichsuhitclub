@@ -1,142 +1,107 @@
-import json
-import threading
-import time
-import os
-import logging
-import socket
-from urllib.request import urlopen, Request
-from flask import Flask, jsonify
+const express = require("express");
+const axios = require("axios");
 
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-HOST = '0.0.0.0'
-POLL_INTERVAL = 5
-RETRY_DELAY = 5
-MAX_HISTORY = 50
+const POLL_INTERVAL = 5000;
+const RETRY_DELAY = 5000;
+const MAX_HISTORY = 50;
 
-lock_100 = threading.Lock()
-lock_101 = threading.Lock()
+let latest100 = { Phien: 0, Xuc_xac_1: 0, Xuc_xac_2: 0, Xuc_xac_3: 0, Tong: 0, Ket_qua: "Chưa có" };
+let latest101 = { Phien: 0, Xuc_xac_1: 0, Xuc_xac_2: 0, Xuc_xac_3: 0, Tong: 0, Ket_qua: "Chưa có" };
 
-latest_result_100 = {
-    "Phien": 0, "Xuc_xac_1": 0, "Xuc_xac_2": 0, "Xuc_xac_3": 0,
-    "Tong": 0, "Ket_qua": "Chưa có"
-}
-latest_result_101 = {
-    "Phien": 0, "Xuc_xac_1": 0, "Xuc_xac_2": 0, "Xuc_xac_3": 0,
-    "Tong": 0, "Ket_qua": "Chưa có"
+let history100 = [];
+let history101 = [];
+
+let lastSid100 = null;
+let lastSid101 = null;
+let sidForTX = null;
+
+function getTaiXiu(d1, d2, d3) {
+  const total = d1 + d2 + d3;
+  return total <= 10 ? "Xỉu" : "Tài";
 }
 
-history_100 = []
-history_101 = []
+function updateResult(store, history, result) {
+  Object.assign(store, result);
+  history.unshift({ ...result });
+  if (history.length > MAX_HISTORY) history.pop();
+}
 
-last_sid_100 = None
-last_sid_101 = None
-sid_for_tx = None
+async function pollApi(gid, isMd5) {
+  const url = `https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid=${gid}`;
+  while (true) {
+    try {
+      const resp = await axios.get(url, { headers: { "User-Agent": "Node-Proxy/1.0" }, timeout: 10000 });
+      const data = resp.data;
+      if (data.status === "OK" && Array.isArray(data.data)) {
+        for (const game of data.data) {
+          const cmd = game.cmd;
+          if (!isMd5 && cmd === 1008) {
+            sidForTX = game.sid;
+          }
+        }
 
-def get_tai_xiu(d1, d2, d3):
-    total = d1 + d2 + d3
-    return "Xỉu" if total <= 10 else "Tài"
+        for (const game of data.data) {
+          const cmd = game.cmd;
+          if (isMd5 && cmd === 2006) {
+            const sid = game.sid;
+            const { d1, d2, d3 } = game;
+            if (sid && sid !== lastSid101 && d1 != null && d2 != null && d3 != null) {
+              lastSid101 = sid;
+              const total = d1 + d2 + d3;
+              const ketQua = getTaiXiu(d1, d2, d3);
+              const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
+              updateResult(latest101, history101, result);
+              console.log(`[MD5] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
+            }
+          } else if (!isMd5 && cmd === 1003) {
+            const { d1, d2, d3 } = game;
+            const sid = sidForTX;
+            if (sid && sid !== lastSid100 && d1 != null && d2 != null && d3 != null) {
+              lastSid100 = sid;
+              const total = d1 + d2 + d3;
+              const ketQua = getTaiXiu(d1, d2, d3);
+              const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
+              updateResult(latest100, history100, result);
+              console.log(`[TX] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
+              sidForTX = null;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`Lỗi khi lấy dữ liệu API ${gid}:`, e.message);
+      await new Promise(r => setTimeout(r, RETRY_DELAY));
+    }
+    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+  }
+}
 
-def update_result(store, history, lock, result):
-    with lock:
-        store.clear()
-        store.update(result)
-        history.insert(0, result.copy())
-        if len(history) > MAX_HISTORY:
-            history.pop()
+// format chuẩn xuất ra
+function formatResult(result) {
+  return {
+    Phien: result.Phien,
+    Xuc_xac_1: result.Xuc_xac_1,
+    Xuc_xac_2: result.Xuc_xac_2,
+    Xuc_xac_3: result.Xuc_xac_3,
+    Tong: result.Tong,
+    Ket_qua: result.Ket_qua
+  };
+}
 
-def poll_api(gid, lock, result_store, history, is_md5):
-    global last_sid_100, last_sid_101, sid_for_tx
-    url = f"https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid={gid}"
-    while True:
-        try:
-            req = Request(url, headers={'User-Agent': 'Python-Proxy/1.0'})
-            with urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-            if data.get('status') == 'OK' and isinstance(data.get('data'), list):
-                for game in data['data']:
-                    cmd = game.get("cmd")
-                    if not is_md5 and cmd == 1008:
-                        sid_for_tx = game.get("sid")
-                for game in data['data']:
-                    cmd = game.get("cmd")
-                    if is_md5 and cmd == 2006:
-                        sid = game.get("sid")
-                        d1, d2, d3 = game.get("d1"), game.get("d2"), game.get("d3")
-                        if sid and sid != last_sid_101 and None not in (d1, d2, d3):
-                            last_sid_101 = sid
-                            total = d1 + d2 + d3
-                            ket_qua = get_tai_xiu(d1, d2, d3)
-                            result = {
-                                "Phien": sid,
-                                "Xuc_xac_1": d1,
-                                "Xuc_xac_2": d2,
-                                "Xuc_xac_3": d3,
-                                "Tong": total,
-                                "Ket_qua": ket_qua
-                            }
-                            update_result(result_store, history, lock, result)
-                            logger.info(f"[MD5] Phiên {sid} - Tổng: {total}, Kết quả: {ket_qua}")
-                    elif not is_md5 and cmd == 1003:
-                        d1, d2, d3 = game.get("d1"), game.get("d2"), game.get("d3")
-                        sid = sid_for_tx
-                        if sid and sid != last_sid_100 and None not in (d1, d2, d3):
-                            last_sid_100 = sid
-                            total = d1 + d2 + d3
-                            ket_qua = get_tai_xiu(d1, d2, d3)
-                            result = {
-                                "Phien": sid,
-                                "Xuc_xac_1": d1,
-                                "Xuc_xac_2": d2,
-                                "Xuc_xac_3": d3,
-                                "Tong": total,
-                                "Ket_qua": ket_qua
-                            }
-                            update_result(result_store, history, lock, result)
-                            logger.info(f"[TX] Phiên {sid} - Tổng: {total}, Kết quả: {ket_qua}")
-                            sid_for_tx = None
-        except Exception as e:
-            logger.error(f"Lỗi khi lấy dữ liệu API {gid}: {e}")
-            time.sleep(RETRY_DELAY)
-        time.sleep(POLL_INTERVAL)
+// Start polling
+pollApi("vgmn_100", false);
+pollApi("vgmn_101", true);
 
-app = Flask(__name__)
+// API endpoints
+app.get("/api/taixiu", (req, res) => res.json(formatResult(latest100)));
+app.get("/api/taixiumd5", (req, res) => res.json(formatResult(latest101)));
+app.get("/api/history", (req, res) => res.json({
+  taixiu: history100.map(formatResult),
+  taixiumd5: history101.map(formatResult)
+}));
+app.get("/", (req, res) => res.send("API Server for TaiXiu is running. Endpoints: /api/taixiu, /api/taixiumd5, /api/history"));
 
-@app.route("/api/taixiu", methods=["GET"])
-def get_taixiu_100():
-    with lock_100:
-        return jsonify(latest_result_100)
-
-@app.route("/api/taixiumd5", methods=["GET"])
-def get_taixiu_101():
-    with lock_101:
-        return jsonify(latest_result_101)
-
-@app.route("/api/history", methods=["GET"])
-def get_history():
-    with lock_100, lock_101:
-        return jsonify({
-            "taixiu": history_100,
-            "taixiumd5": history_101
-        })
-
-@app.route("/")
-def index():
-    return jsonify({
-        "message": "API Server for TaiXiu is running",
-        "endpoints": ["/api/taixiu", "/api/taixiumd5", "/api/history"]
-    })
-
-if __name__ == "__main__":
-    logger.info("Khởi động hệ thống API Tài Xỉu...")
-    thread_100 = threading.Thread(target=poll_api, args=("vgmn_100", lock_100, latest_result_100, history_100, False), daemon=True)
-    thread_101 = threading.Thread(target=poll_api, args=("vgmn_101", lock_101, latest_result_101, history_101, True), daemon=True)
-    thread_100.start()
-    thread_101.start()
-    logger.info("Đã bắt đầu polling dữ liệu.")
-
-    # Render cấp PORT qua biến môi trường, bắt buộc phải dùng
-    port = int(os.environ.get("PORT", 8000))
-    logger.info(f"Server chạy trên cổng {port}")
-    app.run(host=HOST, port=port)
+app.listen(PORT, () => console.log(`Server chạy trên cổng ${PORT}`));

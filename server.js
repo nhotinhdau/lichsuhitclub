@@ -4,19 +4,16 @@ const axios = require("axios");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const POLL_INTERVAL = 5000;   // thời gian poll API
-const RETRY_DELAY = 5000;     // thời gian chờ khi lỗi
-const MAX_HISTORY = 50;       // lưu tối đa 50 phiên lịch sử
+const POLL_INTERVAL = 5000;
+const RETRY_DELAY = 5000;
+const MAX_HISTORY = 50;
 
-// Biến lưu kết quả hiện tại
 let latest100 = { Phien: 0, Xuc_xac_1: 0, Xuc_xac_2: 0, Xuc_xac_3: 0, Tong: 0, Ket_qua: "Chưa có" };
 let latest101 = { Phien: 0, Xuc_xac_1: 0, Xuc_xac_2: 0, Xuc_xac_3: 0, Tong: 0, Ket_qua: "Chưa có" };
 
-// Lịch sử
 let history100 = [];
 let history101 = [];
 
-// Biến hỗ trợ TX
 let sidForTX = null;
 
 function getTaiXiu(d1, d2, d3) {
@@ -48,8 +45,8 @@ async function pollApi(gid, isMd5) {
         for (const game of data.data) {
           const cmd = game.cmd;
 
-          // xử lý MD5 (vgmn_101)
-          if (isMd5 && cmd === 2006) {
+          // ✅ xử lý MD5 (vgmn_101)
+          if (isMd5 && cmd === 7006) {
             const sid = game.sid;
             const { d1, d2, d3 } = game;
             if (sid && d1 != null && d2 != null && d3 != null) {
@@ -61,7 +58,7 @@ async function pollApi(gid, isMd5) {
             }
           }
 
-          // xử lý TX (vgmn_100)
+          // ✅ xử lý TX (vgmn_100)
           else if (!isMd5 && cmd === 1003) {
             const { d1, d2, d3 } = game;
             const sid = sidForTX;
@@ -71,7 +68,7 @@ async function pollApi(gid, isMd5) {
               const result = { Phien: sid, Xuc_xac_1: d1, Xuc_xac_2: d2, Xuc_xac_3: d3, Tong: total, Ket_qua: ketQua };
               updateResult(latest100, history100, result);
               console.log(`[TX] Phiên ${sid} - Tổng: ${total}, Kết quả: ${ketQua}`);
-              sidForTX = null; // reset để tránh lặp sai
+              sidForTX = null;
             }
           }
         }
@@ -84,7 +81,6 @@ async function pollApi(gid, isMd5) {
   }
 }
 
-// format chuẩn xuất ra
 function formatResult(result) {
   return {
     Phien: result.Phien,
@@ -97,8 +93,8 @@ function formatResult(result) {
 }
 
 // Start polling
-pollApi("vgmn_100", false);
-pollApi("vgmn_101", true);
+pollApi("vgmn_100", false); // TX
+pollApi("vgmn_101", true);  // MD5
 
 // API endpoints
 app.get("/api/taixiu", (req, res) => res.json(formatResult(latest100)));
